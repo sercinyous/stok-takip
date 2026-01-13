@@ -67,36 +67,69 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ name, inStock: stock > 0 });
     }
 
-    // Son çare: HTML içinde tükendi kelimesi arama (daha spesifik)
-    const htmlLower = html.toLowerCase();
-    const tükendiPatterns = [
-      /tükendi/i,
-      /stokta yok/i,
-      /stokta bulunmamaktadır/i,
-      /"inStock"\s*:\s*false/,
-      /"availability"\s*:\s*"outofstock"/i,
-      /class="[^"]*sold-out[^"]*"/i,
-      /class="[^"]*out-of-stock[^"]*"/i,
-    ];
+    // "inStock": true/false pattern'leri
+    const inStockTrueMatch = html.match(/"inStock"\s*:\s*true/);
+    const inStockFalseMatch = html.match(/"inStock"\s*:\s*false/);
+    
+    if (inStockTrueMatch && !inStockFalseMatch) {
+      return NextResponse.json({ name, inStock: true });
+    }
+    if (inStockFalseMatch && !inStockTrueMatch) {
+      return NextResponse.json({ name, inStock: false });
+    }
 
-    const isOutOfStock = tükendiPatterns.some(pattern => pattern.test(html));
+    // "available": true/false pattern'leri
+    const availableTrueMatch = html.match(/"available"\s*:\s*true/);
+    const availableFalseMatch = html.match(/"available"\s*:\s*false/);
+    
+    if (availableTrueMatch && !availableFalseMatch) {
+      return NextResponse.json({ name, inStock: true });
+    }
+    if (availableFalseMatch && !availableTrueMatch) {
+      return NextResponse.json({ name, inStock: false });
+    }
 
-    // Eğer "Sepete Ekle" butonu varsa ve tükendi yoksa, stokta demektir
-    const addToCartPatterns = [
-      /sepete ekle/i,
+    // Pozitif işaretler: Sepete Ekle butonu, Stokta yazısı
+    const positiveIndicators = [
+      /<button[^>]*>[\s\S]*?sepete\s+ekle[\s\S]*?<\/button>/i,
       /"addToCart"/i,
       /class="[^"]*add-to-cart[^"]*"/i,
+      /stokta\s+var/i,
+      /stokta/i,
+      /"availability"\s*:\s*"instock"/i,
+      /"availability"\s*:\s*"InStock"/i,
+      /"availability"\s*:\s*"https:\/\/schema\.org\/InStock"/i,
     ];
 
-    const hasAddToCart = addToCartPatterns.some(pattern => pattern.test(html));
+    // Negatif işaretler: Tükendi, Stokta Yok (daha spesifik)
+    const negativeIndicators = [
+      /<span[^>]*>[\s\S]*?tükendi[\s\S]*?<\/span>/i,
+      /<div[^>]*>[\s\S]*?tükendi[\s\S]*?<\/div>/i,
+      /<button[^>]*disabled[^>]*>[\s\S]*?tükendi[\s\S]*?<\/button>/i,
+      /"availability"\s*:\s*"outofstock"/i,
+      /"availability"\s*:\s*"OutOfStock"/i,
+      /"availability"\s*:\s*"https:\/\/schema\.org\/OutOfStock"/i,
+      /class="[^"]*sold-out[^"]*"/i,
+      /class="[^"]*out-of-stock[^"]*"/i,
+      /class="[^"]*tükendi[^"]*"/i,
+    ];
 
-    // Stok durumu belirleme
+    const hasPositive = positiveIndicators.some(pattern => pattern.test(html));
+    const hasNegative = negativeIndicators.some(pattern => pattern.test(html));
+
+    // Stok durumu belirleme: Pozitif işaret varsa stokta, negatif varsa tükendi
+    // İkisi de yoksa varsayılan olarak stokta kabul et (daha güvenli)
     let inStock = true;
-    if (isOutOfStock) {
+    
+    if (hasNegative && !hasPositive) {
       inStock = false;
-    } else if (hasAddToCart && !isOutOfStock) {
+    } else if (hasPositive && !hasNegative) {
+      inStock = true;
+    } else if (hasPositive && hasNegative) {
+      // İkisi de varsa, pozitif işaretlere öncelik ver
       inStock = true;
     }
+    // İkisi de yoksa varsayılan olarak stokta (inStock = true)
 
     return NextResponse.json({
       name,
